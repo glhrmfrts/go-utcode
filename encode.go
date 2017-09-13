@@ -4,31 +4,33 @@ import (
 	"bytes"
 	"encoding/base64"
 	"fmt"
-	"io"
 	"reflect"
 	"runtime"
 	"strings"
 )
 
-// Encode will encode the value and return a byte slice
+// Encode will encode the value using the default Encoder
 func Encode(v interface{}) ([]byte, error) {
-	e := Encoder{dest: bytes.NewBuffer([]byte{})}
+	var e Encoder
 	err := e.Encode(v)
-
 	if err != nil {
 		return nil, err
 	}
-
-	bytesBuf := e.dest.(*bytes.Buffer)
-	return bytesBuf.Bytes(), nil
+	return e.Bytes(), nil
 }
 
+// Encoder contains the output buffer of the value encoded
+// and allows to register custom type encoders
 type Encoder struct {
-	dest io.Writer
+	bytes.Buffer
+	custom map[reflect.Kind]typeEncoder
 }
 
-func NewEncoder(dest io.Writer) *Encoder {
-	return &Encoder{dest}
+func NewEncoder() *Encoder {
+	e := &Encoder{
+		custom: make(map[reflect.Kind]typeEncoder),
+	}
+	return e
 }
 
 // Encode the value to utcode, returns an error if there's any
@@ -47,10 +49,15 @@ func (e *Encoder) Encode(v interface{}) (err error) {
 
 	value := reflect.ValueOf(v)
 
-	e.dest.Write([]byte("ut:"))
+	e.WriteString("ut:")
 	e.encodeType(value)
 
 	return nil
+}
+
+// Register a custom type encoder
+func (e *Encoder) Register(t reflect.Kind, encoder typeEncoder) {
+	e.custom[t] = encoder
 }
 
 func (e *Encoder) encodeType(v reflect.Value) {
@@ -59,7 +66,7 @@ func (e *Encoder) encodeType(v reflect.Value) {
 		if v.IsValid() {
 			panic(fmt.Errorf("unsupported encode type %v", v.Kind()))
 		} else {
-			e.dest.Write([]byte("n:e"))
+			e.WriteString("n:e")
 		}
 
 		return
@@ -91,42 +98,44 @@ func (e *Encoder) typeEncoder(t reflect.Kind) typeEncoder {
 	case reflect.Ptr, reflect.Interface:
 		return ptrEncoder
 	default:
-		return nil
+		encoder, ok := e.custom[t]
+		if !ok {
+			return nil
+		}
+		return encoder
 	}
 }
 
 type typeEncoder func(e *Encoder, v reflect.Value)
 
 func boolEncoder(e *Encoder, v reflect.Value) {
-	result := []byte("b:")
+	e.WriteString("b:")
 	if v.Bool() {
-		result = append(result, '0')
+		e.WriteString("1")
 	} else {
-		result = append(result, '0')
+		e.WriteString("0")
 	}
-
-	e.dest.Write(result)
 }
 
 func intEncoder(e *Encoder, v reflect.Value) {
-	e.dest.Write([]byte(fmt.Sprintf("i:%ve", v.Int())))
+	e.WriteString(fmt.Sprintf("i:%ve", v.Int()))
 }
 
 func uintEncoder(e *Encoder, v reflect.Value) {
-	e.dest.Write([]byte(fmt.Sprintf("i:%ve", v.Uint())))
+	e.WriteString(fmt.Sprintf("i:%ve", v.Uint()))
 }
 
 func floatEncoder(e *Encoder, v reflect.Value) {
-	e.dest.Write([]byte(fmt.Sprintf("f:%vz", v.Float())))
+	e.WriteString(fmt.Sprintf("f:%vz", v.Float()))
 }
 
 func stringEncoder(e *Encoder, v reflect.Value) {
 	b64 := base64.StdEncoding.EncodeToString([]byte(v.String()))
-	e.dest.Write([]byte(fmt.Sprintf("u%v:%v", len(b64), b64)))
+	e.WriteString(fmt.Sprintf("u%v:%v", len(b64), b64))
 }
 
 func structEncoder(e *Encoder, v reflect.Value) {
-	e.dest.Write([]byte("d:"))
+	e.WriteString("d:")
 
 	t := v.Type()
 	for i := 0; i < t.NumField(); i++ {
@@ -142,30 +151,30 @@ func structEncoder(e *Encoder, v reflect.Value) {
 			name = tag
 		}
 
-		e.dest.Write([]byte(fmt.Sprintf("k%v:%v", len(name), name)))
+		e.WriteString(fmt.Sprintf("k%v:%v", len(name), name))
 		e.encodeType(v.FieldByName(field.Name))
 	}
 
-	e.dest.Write([]byte("e"))
+	e.WriteString("e")
 }
 
 func mapEncoder(e *Encoder, v reflect.Value) {
 	if v.IsNil() {
-		e.dest.Write([]byte("n:e"))
+		e.WriteString("n:e")
 	}
 
-	e.dest.Write([]byte("d:"))
+	e.WriteString("d:")
 	for _, k := range v.MapKeys() {
 		if k.Type().Kind() != reflect.String {
 			panic("map encoding supports only string as key")
 		}
 
 		str := k.String()
-		e.dest.Write([]byte(fmt.Sprintf("k%v:%v", len(str), str)))
+		e.WriteString(fmt.Sprintf("k%v:%v", len(str), str))
 
 		e.encodeType(v.MapIndex(k))
 	}
-	e.dest.Write([]byte("e"))
+	e.WriteString("e")
 }
 
 var (
@@ -174,7 +183,7 @@ var (
 
 func sliceEncoder(e *Encoder, v reflect.Value) {
 	if v.IsNil() {
-		e.dest.Write([]byte("n:e"))
+		e.WriteString("n:e")
 		return
 	}
 
@@ -183,16 +192,16 @@ func sliceEncoder(e *Encoder, v reflect.Value) {
 		return
 	}
 
-	e.dest.Write([]byte("l:"))
+	e.WriteString("l:")
 	for i := 0; i < v.Len(); i++ {
 		e.encodeType(v.Index(i))
 	}
-	e.dest.Write([]byte("e"))
+	e.WriteString("e")
 }
 
 func ptrEncoder(e *Encoder, v reflect.Value) {
 	if v.IsNil() {
-		e.dest.Write([]byte("n:e"))
+		e.WriteString("n:e")
 		return
 	}
 

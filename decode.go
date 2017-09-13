@@ -11,21 +11,23 @@ import (
 
 // Decode will decode the UTCode data using the default Decoder
 func Decode(data []byte, v interface{}) error {
-	d := Decoder{reader: strings.NewReader(data)}
-	return d.Decode(v)
+	var d Decoder
+	return d.Decode(data, v)
 }
 
 type Decoder struct {
-	reader io.Reader
+	data   []byte
+	off    int
+	custom map[string]typeDecoder
 }
 
-func NewDecoder(r io.Reader) {
+func NewDecoder() *Decoder {
 	return &Decoder{
-		reader: r,
+		custom: make(map[string]typeDecoder),
 	}
 }
 
-func (d *Decoder) Decode(v interface{}) (err error) {
+func (d *Decoder) Decode(data []byte, v interface{}) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			if _, ok := r.(runtime.Error); ok {
@@ -40,11 +42,16 @@ func (d *Decoder) Decode(v interface{}) (err error) {
 
 	value := reflect.ValueOf(v)
 
-	if !d.readAndMatch(3, "ut:") {
+	d.data = data
+	d.off = 0
+
+	if d.read(3) != "ut:" {
 		panic(NewDecodeError("invalid utcode"))
 	}
 
-	if value.IsNil() {
+	if (value.Kind() == reflect.Ptr || value.Kind() == reflect.Interface) && value.Elem().IsNil() {
+		value.Elem().Set(d.decodeTypeAndCreate())
+	} else if value.IsNil() {
 		value.Set(d.decodeTypeAndCreate())
 	} else {
 		d.decodeType(value)
@@ -70,8 +77,6 @@ func (d *Decoder) decodeType(v reflect.Value) {
 
 	decoder(d, key, v)
 }
-
-// TODO: no-structs
 
 func (d *Decoder) decodeTypeAndCreate() reflect.Value {
 	if d.off >= len(d.data) {
