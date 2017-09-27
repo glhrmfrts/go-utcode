@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
+	"math"
 )
 
 // Encode will encode the value using the default Encoder
@@ -126,7 +127,14 @@ func uintEncoder(e *Encoder, v reflect.Value) {
 }
 
 func floatEncoder(e *Encoder, v reflect.Value) {
-	e.WriteString(fmt.Sprintf("f:%vz", v.Float()))
+	var result string
+	f := v.Float()
+	if f == math.Floor(f) {
+		result = fmt.Sprintf("i:%ve", f)
+	} else {
+		result = fmt.Sprintf("f:%vz", f)
+	}
+	e.WriteString(result)
 }
 
 func stringEncoder(e *Encoder, v reflect.Value) {
