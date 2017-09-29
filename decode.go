@@ -49,7 +49,7 @@ func (d *Decoder) Decode(data []byte, v interface{}) (err error) {
 		panic(NewDecodeError("invalid utcode"))
 	}
 
-	if (value.Kind() == reflect.Ptr || value.Kind() == reflect.Interface) && value.Elem().IsNil() {
+	if (value.Kind() == reflect.Ptr || value.Kind() == reflect.Interface) && value.IsNil() {
 		value.Elem().Set(d.decodeTypeAndCreate())
 	} else if value.IsNil() {
 		value.Set(d.decodeTypeAndCreate())
@@ -250,7 +250,7 @@ func unicodeDecoder(d *Decoder, key string, v reflect.Value) {
 
 func dictDecoder(d *Decoder, key string, v reflect.Value) {
 	mapValue := v
-	if v.IsNil() {
+	if v.Type().Kind() != reflect.Struct && v.IsNil() {
 		mapValue = reflect.ValueOf(map[string]interface{}{})
 	}
 
@@ -264,7 +264,7 @@ func dictDecoder(d *Decoder, key string, v reflect.Value) {
 		fillStruct(d, mapValue)
 	}
 
-	if v.IsNil() {
+	if v.Type().Kind() != reflect.Struct && v.IsNil() {
 		v.Set(mapValue)
 	}
 
